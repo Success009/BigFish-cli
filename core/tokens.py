@@ -332,6 +332,41 @@ def get_least_used_profile(available_profiles, current_profile, ledger=None, led
     candidates.sort(key=lambda p: get_rate_limited_until(p, prov, ledger=ledger, now_ts=now_ts))
     return candidates[0]
 
+def get_usable_profiles(available_profiles, provider=None, exclude=None, ledger=None, ledger_file=None,
+                        now_ts=None, email_of=None):
+    """Profiles that can take a switch right now: not `exclude`, signed in (Gemini), and not rate
+    limited for this provider. If no profile has a readable account at all (Local State missing),
+    the signed-in check is skipped instead of rejecting everything."""
+    now_ts = time.time() if now_ts is None else now_ts
+    prov = (provider or "gemini").lower()
+    if ledger is None:
+        ledger = load_ledger(ledger_file)
+    names = list(available_profiles or [])
+    pool = [p for p in names if p != exclude]
+    if prov == "gemini":
+        lookup = email_of or get_profile_email_from_local_state
+        mails = {p: lookup(p) for p in names}
+        if any(mails.values()):
+            pool = [p for p in pool if mails.get(p)]
+    return [p for p in pool if not is_rate_limited(p, prov, ledger=ledger, now_ts=now_ts)]
+
+
+def pick_transfer_target(available_profiles, current_profile, provider=None, ledger=None, ledger_file=None,
+                         now_ts=None, email_of=None):
+    """Next profile for a transfer, or None when no other usable profile exists (there is no other
+    profile, the others are signed out, or every one of them is rate limited)."""
+    now_ts = time.time() if now_ts is None else now_ts
+    prov = (provider or "gemini").lower()
+    if ledger is None:
+        ledger = load_ledger(ledger_file)
+    usable = get_usable_profiles(available_profiles, prov, exclude=current_profile, ledger=ledger,
+                                 now_ts=now_ts, email_of=email_of)
+    if not usable:
+        return None
+    ordered = [p for p in (available_profiles or []) if p in usable or p == current_profile]
+    return get_least_used_profile(ordered, current_profile, ledger=ledger, provider=prov)
+
+
 def get_profiles_usage_summary(available_profiles=None, ledger=None, ledger_file=None, provider=None):
     """
     Returns structured list of usage stats across available profiles.

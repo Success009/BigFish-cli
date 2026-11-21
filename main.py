@@ -646,9 +646,10 @@ def main():
                         else:
                             # Intelligent Least-Used Transfer Routing
                             usage_summary = tokens.get_profiles_usage_summary(available_profiles, provider=active_provider)
-                            next_profile_dir = tokens.get_least_used_profile(available_profiles, current_active_profile_dir, provider=active_provider)
+                            next_profile_dir = tokens.pick_transfer_target(available_profiles, current_active_profile_dir, provider=active_provider)
                             if not next_profile_dir:
-                                next_profile_dir = available_profiles[0]
+                                ui.show_error("No other usable profile to transfer to (the others are signed out or rate limited). Pass a number to force one, e.g. /transfer 2.")
+                                continue
                             ui.show_profile_usage_analysis(usage_summary, next_profile_dir)
                             
                         # Resolve display index for logging
@@ -872,9 +873,10 @@ def main():
                             except Exception as _e:
                                 dlog.log("RATE", f"mark_rate_limited failed: {_e}")
 
-                            next_profile_dir = tokens.get_least_used_profile(available_profiles, current_active_profile_dir, provider=active_provider)
+                            next_profile_dir = tokens.pick_transfer_target(available_profiles, current_active_profile_dir, provider=active_provider)
                             if not next_profile_dir:
-                                next_profile_dir = [p for p in available_profiles if p != current_active_profile_dir][0] if len(available_profiles) > 1 else available_profiles[0]
+                                ui.show_error("No other usable profile to transfer to (the others are signed out or rate limited). Stopped. Try again after a limit resets.")
+                                break
                                 
                             usage_summary = tokens.get_profiles_usage_summary(available_profiles, provider=active_provider)
                             ui.show_profile_usage_analysis(usage_summary, next_profile_dir)

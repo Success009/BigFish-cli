@@ -184,6 +184,10 @@ def _default_channel(idx):
     from subagents.browserpool import BrowserSlot
     from subagents import factory as F, profile_pick as PP
     profiles = list(F._default_profiles())
+    import tokens as _tk
+    profiles = _tk.get_usable_profiles(profiles, "gemini")
+    if not profiles:
+        raise RuntimeError("no usable profile: every profile is signed out or rate limited")
     with _PROFILES_LOCK:
         taken = [p for i, p in _PROFILES.items() if i != idx]
         try:
