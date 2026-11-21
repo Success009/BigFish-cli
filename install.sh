@@ -9,8 +9,13 @@ H="$(getent passwd "$U" | cut -d: -f6)"
 REPO="Success009/BigFish-cli"
 
 echo "[1/5] System packages"
-apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates xclip wl-clipboard wmctrl x11-utils ffmpeg pulseaudio-utils alsa-utils
+need=""
+for c in python3 pip3 curl xclip wl-paste wmctrl xprop ffmpeg paplay aplay; do command -v "$c" >/dev/null || need=1; done
+python3 -c "import venv, ensurepip" 2>/dev/null || need=1
+if [ -n "$need" ]; then
+  apt-get update -qq
+  apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates xclip wl-clipboard wmctrl x11-utils ffmpeg pulseaudio-utils alsa-utils
+fi
 
 echo "[2/5] Google Chrome"
 if ! command -v google-chrome >/dev/null; then
@@ -26,8 +31,12 @@ curl -fsSL "https://github.com/$REPO/archive/refs/heads/main.tar.gz" | tar -xz -
 
 echo "[4/5] Python packages"
 [ -d "$D/venv" ] || python3 -m venv "$D/venv"
-"$D/venv/bin/pip" install -q -U pip
-"$D/venv/bin/pip" install -q -U -r "$D/requirements.txt"
+S="$D/venv/.req-$(md5sum "$D/requirements.txt" | cut -d' ' -f1)"
+if [ ! -f "$S" ]; then
+  "$D/venv/bin/pip" install -q -U -r "$D/requirements.txt"
+  rm -f "$D"/venv/.req-*
+  touch "$S"
+fi
 
 echo "[5/5] Voice (Piper + Jenny voice)"
 A="$D/audio"

@@ -10,13 +10,9 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class TestLayoutPaths(unittest.TestCase):
-    def test_user_data_dir_uses_sandbox_when_present(self):
+        def test_user_data_dir_is_dedicated_bigfish_folder(self):
         import profiles
-        sandbox = os.path.join(ROOT, "~", ".config", "google-chrome")
-        if os.path.exists(sandbox):
-            self.assertEqual(os.path.abspath(profiles.get_chrome_user_data_dir()), sandbox)
-        else:
-            self.assertEqual(profiles.get_chrome_user_data_dir(), os.path.expanduser("~/.config/google-chrome"))
+        self.assertEqual(profiles.get_chrome_user_data_dir(), os.path.expanduser("~/.config/bigfish-chrome"))
 
     def test_skills_dir_is_project_skills(self):
         import tools

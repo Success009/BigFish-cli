@@ -122,15 +122,9 @@ def get_chrome_user_data_dir():
     """Resolves and targets the exact Chrome sandboxed user data folder inside your project workspace."""
     if os.name == 'nt':
         return os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\BigFish")
-        
-    # Check if the literal tilde workspace folder exists inside the active project directory
-    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sandbox_path = os.path.join(project_dir, "~", ".config", "google-chrome")
-    if os.path.exists(sandbox_path):
-        return os.path.abspath(sandbox_path)
-        
-    # Fallback to standard home path
-    return os.path.expanduser("~/.config/google-chrome")
+
+            # Dedicated Chrome profile folder (Chrome blocks remote debugging on its default folder)
+            return os.path.expanduser("~/.config/bigfish-chrome")
 
 def get_latest_session(provider=None):
     """Returns the filename of the active session JSON file, falling back to most recently modified."""

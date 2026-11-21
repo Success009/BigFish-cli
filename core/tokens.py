@@ -105,12 +105,7 @@ def get_profile_email_from_local_state(profile_dir, user_data_dir=None):
     Queries Chrome's Local State file to discover registered email for a profile directory.
     """
     if user_data_dir is None:
-        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        sandbox_path = os.path.join(project_dir, "~", ".config", "google-chrome")
-        if os.path.exists(sandbox_path):
-            user_data_dir = sandbox_path
-        else:
-            user_data_dir = os.path.expanduser("~/.config/google-chrome")
+        user_data_dir = os.path.expanduser("~/.config/bigfish-chrome")
             
     local_state_path = os.path.join(user_data_dir, "Local State")
     try:
