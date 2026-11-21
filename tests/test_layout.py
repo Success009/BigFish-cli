@@ -10,7 +10,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class TestLayoutPaths(unittest.TestCase):
-        def test_user_data_dir_is_dedicated_bigfish_folder(self):
+    def test_user_data_dir_is_dedicated_bigfish_folder(self):
         import profiles
         self.assertEqual(profiles.get_chrome_user_data_dir(), os.path.expanduser("~/.config/bigfish-chrome"))
 

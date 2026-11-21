@@ -123,8 +123,8 @@ def get_chrome_user_data_dir():
     if os.name == 'nt':
         return os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\BigFish")
 
-            # Dedicated Chrome profile folder (Chrome blocks remote debugging on its default folder)
-            return os.path.expanduser("~/.config/bigfish-chrome")
+    # Dedicated Chrome profile folder (Chrome blocks remote debugging on its default folder)
+    return os.path.expanduser("~/.config/bigfish-chrome")
 
 def get_latest_session(provider=None):
     """Returns the filename of the active session JSON file, falling back to most recently modified."""
