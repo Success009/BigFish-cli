@@ -269,7 +269,6 @@ class WebAgentController:
     def paste_from_clipboard(self):
         self.connect()
         try:
-            self.bring_to_front()
             chat_box = self.get_chat_box()
             chat_box.click(force=True)
             time.sleep(0.2)
