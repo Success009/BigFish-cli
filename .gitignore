@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+venv/
+known_good/
+backups/
+sessions/
+logs/
+audio/
+.pytest_cache/

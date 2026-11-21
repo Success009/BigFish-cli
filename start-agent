@@ -1,0 +1,16 @@
+#!/bin/bash
+# This script ensures we are in the correct directory,
+# activates the virtual environment, and runs the main agent CLI.
+
+# Find the directory where this script is located
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Activate the Python virtual environment
+source "$DIR/venv/bin/activate"
+
+# Run the main Python application
+# Startup self-check: compiles the code, runs the key tests, snapshots known_good/.
+# On failure it stops here; roll back with ./restore-known-good. Bypass with --skip-check.
+"$DIR/venv/bin/python3" "$DIR/selfcheck.py" "$@" || exit 1
+
+exec "$DIR/venv/bin/python3" "$DIR/main.py" "$@"
