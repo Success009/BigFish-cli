@@ -81,6 +81,8 @@ class WebAgentController:
         """Centralized window focus logic: brings page to front strictly when pasting/submitting payload."""
         if getattr(self, "no_focus", False):
             return   # background search browsers must never take focus
+        if os.environ.get("BF_RAISE_BROWSER", "") != "1":
+            return   # default: never raise the Chrome window
         try:
             if self.page and not self.page.is_closed():
                 self.page.bring_to_front()
@@ -93,6 +95,10 @@ class WebAgentController:
 
             # Fast-path: return immediately if page is already connected and active
             if self.is_connected():
+                try:
+                    self.register_network_listener()   # no-op when this page already has it
+                except Exception as _le:
+                    dlog.log("LISTENER", f"fast-path register failed: {_le}")
                 if target_url:
                     # If current page is already on this exact URL or prompt ID
                     if target_url in self.page.url or (target_prompt_id and target_prompt_id in self.page.url):
@@ -191,13 +197,19 @@ class WebAgentController:
         """Attaches response sniffers strictly targeting generation streams.
         Re-registers when adapter changes (e.g., Gemini -> DeepSeek switch)."""
         registered_for = getattr(self, "_network_listener_registered_for", None)
-        if registered_for != self.adapter.name:
-            # Reset flag so new adapter's listener is attached
+        registered_page = getattr(self, "_network_listener_page", None)
+        if registered_for != self.adapter.name or registered_page is not self.page:
+            # New adapter OR a different page object: this page has no listener yet
             self.captured_responses = []
             self.stream_finished = False
             self.adapter.register_stream_listener(self.page, self)
             self._network_listener_registered_for = self.adapter.name
-            dlog.log("LISTENER", f"registered stream listener for {self.adapter.name}")
+            self._network_listener_page = self.page
+            try:
+                _pu = (self.page.url or "")[:70]
+            except Exception:
+                _pu = "?"
+            dlog.log("LISTENER", f"registered stream listener for {self.adapter.name} page={_pu}")
 
     def configure_tools_for_prompt(self, enable_url_context=False):
         pass
@@ -269,6 +281,7 @@ class WebAgentController:
     def paste_from_clipboard(self):
         self.connect()
         try:
+            self.bring_to_front()
             chat_box = self.get_chat_box()
             chat_box.click(force=True)
             time.sleep(0.2)
@@ -407,7 +420,114 @@ class WebAgentController:
         dlog.log("RATE", "notice confirmed")
         return True
 
+    UI_FALLBACK_LOG = os.path.expanduser("~/gemini_local_agent/ui_fallback.log")
+
+    def _log_ui_fallback(self, turn_marker, ui_text):
+        """Detailed record of a page-scrape turn, in its own file, for debugging capture."""
+        try:
+            try:
+                page_url = (self.page.url or "")[:120]
+            except Exception:
+                page_url = "?"
+            recent = []
+            try:
+                with open(dlog.path(), "r", encoding="utf-8", errors="replace") as f:
+                    recent = f.read().splitlines()[-15:]
+            except Exception:
+                pass
+            txt = ui_text or ""
+            rec = [
+                "=== " + time.strftime("%Y-%m-%d %H:%M:%S") + " UI FALLBACK ===",
+                "turn=" + str(turn_marker)[:40],
+                "provider=" + str(getattr(getattr(self, "adapter", None), "name", "")),
+                "profile=" + str(self._profile_tag()),
+                "page=" + page_url,
+                "reason=" + str(getattr(self, "_last_ui_reason", "") or "?"),
+                "stream_finished=" + str(getattr(self, "stream_finished", "?")),
+                "cdp_captured=" + str(getattr(self, "cdp_captured", "?")),
+                "n_live=" + str(len(getattr(self, "live_payloads", []) or [])),
+                "n_captured_responses=" + str(len(getattr(self, "captured_responses", []) or [])),
+                "http_status=" + str(getattr(self, "rate_status", None)),
+                "listener_adapter=" + str(getattr(self, "_network_listener_registered_for", None)),
+                "listener_on_this_page=" + str(getattr(self, "_network_listener_page", None) is self.page),
+                "ui_text_len=" + str(len(txt)),
+                "ui_head=" + repr(txt[:200]),
+                "ui_tail=" + repr(txt[-200:]),
+                "recent_debug_log:",
+            ] + ["  " + x[:200] for x in recent]
+            path = self.UI_FALLBACK_LOG
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            try:
+                if os.path.getsize(path) > 300000:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        data = f.read()
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(data[-150000:])
+            except OSError:
+                pass
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n".join(rec) + "\n\n")
+            dlog.log("UIFALLBACK", "details saved to " + path)
+        except Exception:
+            pass
+
+    def _profile_tag(self):
+        """Chrome profile folder running on the debug port, cached for 60 seconds."""
+        try:
+            now = time.time()
+            cached = getattr(self, "_profile_tag_cache", None)
+            if cached and now - cached[0] < 60:
+                return cached[1]
+            from profiles import get_running_chrome_profile_dir
+            import profile_ids
+            folder = get_running_chrome_profile_dir() or ""
+            if folder:
+                lab = profile_ids.label(folder)
+                prof = lab if lab == folder else lab.replace(" ", "") + "(" + folder.replace(" ", "") + ")"
+            else:
+                prof = "?"
+            self._profile_tag_cache = (now, prof)
+            return prof
+        except Exception:
+            return "?"
+
+    CAPTURE_HISTORY_LOG = os.path.expanduser("~/gemini_local_agent/capture_history.log")
+    CAPTURE_HISTORY_MAX = 500
+
+    def _log_capture_compact(self, source, prov, prof, cdp, n_live, reason=""):
+        """One short line per turn, kept across restarts, trimmed to the last 500 lines."""
+        try:
+            line = " ".join([time.strftime("%Y-%m-%d %H:%M:%S"), "src=" + str(source), "prov=" + str(prov),
+                             "prof=" + str(prof), "cdp=" + str(cdp), "live=" + str(n_live)])
+            if reason:
+                line += " reason=" + str(reason)[:40]
+            path = self.CAPTURE_HISTORY_LOG
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            lines = []
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.read().splitlines()
+            except OSError:
+                pass
+            lines.append(line)
+            lines = lines[-self.CAPTURE_HISTORY_MAX:]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception:
+            pass
+
     def _tl(self, turn_marker, **kw):
+        try:
+            prof = self._profile_tag()
+            prov = str(getattr(getattr(self, "adapter", None), "name", ""))
+            kw.setdefault("profile", prof)
+            if kw.get("source") in ("ui_pending", "none"):
+                self._last_ui_reason = str(kw.get("reason", ""))
+            dlog.log("CAPTURE", "source=" + str(kw.get("source", "?")) + " provider=" + prov + " profile=" + str(prof)
+                     + " cdp=" + str(kw.get("cdp", "?")) + " n_live=" + str(kw.get("n_live", "?")))
+            self._log_capture_compact(kw.get("source", "?"), prov, prof, kw.get("cdp", "?"), kw.get("n_live", "?"), kw.get("reason", ""))
+        except Exception:
+            pass
         try:
             turnlog.record(turn=str(turn_marker)[:40], provider=str(getattr(getattr(self, "adapter", None), "name", "")), **kw)
         except Exception:
@@ -583,6 +703,8 @@ class WebAgentController:
             pass
             sys.stdout.flush()  # clear spinner line
             if final_text and not self.adapter.is_pure_thought(final_text):
+                self.last_source = "network"
+                self._last_ui_reason = ""
                 return f"{turn_marker}\n{final_text}"
 
             # Guard: if the prompt never registered and nothing was captured,
@@ -614,6 +736,8 @@ class WebAgentController:
 
             self.scroll_chat_to_bottom()
             ui_text = self.adapter.extract_ui_response(self.page, turn_marker)
+            self.last_source = "ui"
+            self._log_ui_fallback(turn_marker, ui_text)
             if ui_text:
                 cleaned_ui = self.adapter.clean_payload(ui_text) or ui_text.strip()
                 if cleaned_ui:

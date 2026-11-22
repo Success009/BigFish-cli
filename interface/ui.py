@@ -225,13 +225,15 @@ def show_header(provider="Gemini"):
 
 def show_status(message): console.print(f"[bold yellow]{escape(message)}[/bold yellow]")
 
+def show_capture_notice(message): console.print(f"[red]{escape(message)}[/red]")
+
 def get_spinner(message):
     return console.status(f"[bold yellow]{escape(message)}[/bold yellow]", spinner="dots", spinner_style="cyan")
 
 # ---- Prompt status line -------------------------------------------------
 # The status line is part of the prompt message (a callable), so F2/F3 can
 # change the finish state and redraw it in place with app.invalidate().
-_prompt_info = {"tokens": 0, "provider": ""}
+_prompt_info = {"tokens": 0, "provider": "", "source": ""}
 
 def _finish_label():
     """Current finish-notification state for the status line (off/sound/raise/raise+sound)."""
@@ -254,10 +256,17 @@ def _finish_symbol():
     except Exception:
         return '?'
 
+def _provider_shown():
+    """Provider name for the status line; adds a small marker when the last reply came from page scraping."""
+    prov = _prompt_info['provider']
+    if prov and _prompt_info.get('source') == 'ui':
+        prov = prov + ' - page'
+    return prov
+
 def _prompt_message():
     t = _prompt_info['tokens']
     tok = f"{t/1000:.1f}k" if t >= 1000 else str(t)
-    parts = [f"⚡ {tok} tokens", _prompt_info['provider'], _finish_symbol()]
+    parts = [f"⚡ {tok} tokens", _provider_shown(), _finish_symbol()]
     try:
         if audio.is_speaking():
             parts.append('🔊')
@@ -270,10 +279,11 @@ def _safe_input():
     """True when the plain input() fallback is requested (--safe flag or BIGFISH_SAFE_INPUT=1)."""
     return "--safe" in sys.argv or os.environ.get("BIGFISH_SAFE_INPUT", "").strip() in ("1", "true", "yes")
 
-def show_prompt(token_count=0, manual_mode=False, provider="DeepSeek"):
+def show_prompt(token_count=0, manual_mode=False, provider="DeepSeek", source=""):
     import debuglog as _dlog
     _prompt_info["tokens"] = token_count
     _prompt_info["provider"] = provider
+    _prompt_info["source"] = source
     if _safe_input():
         # Plain input(): no PromptSession, no custom key bindings. Ctrl+D leaves the CLI.
         try:
@@ -485,24 +495,58 @@ def show_provider_usage_report(report, active_profile=None, provider_name=None):
     console.print(Panel("\n".join(lines), title=f"{escape(name)} Totals", border_style="cyan"))
 
 def _label(profile_dir, email=""):
+    """Always the email number (user13 -> Profile 13). The Chrome folder name is only a last resort."""
     try:
-        import tokens
-        return tokens.profile_label(profile_dir, email)
+        import profile_ids
+        return profile_ids.label(profile_dir)
     except Exception:
         return profile_dir or "?"
 
-def show_profile_usage_analysis(usage_list, selected_profile):
-    lines = ["[bold cyan][Transfer] 📊 Profile Usage Analysis:[/bold cyan]"]
+def show_profile_usage_analysis(usage_list, selected_profile, provider=None):
+    """Transfer screen: one row per profile, sorted by account number, with a clear status."""
+    import time as _time
+    try:
+        import tokens
+    except Exception:
+        tokens = None
+    now = _time.time()
+    rows = []
     for item in usage_list:
         p = item.get("profile_dir", "")
-        email = item.get("email", "") or "No Email"
-        lbl = _label(p, item.get("email", ""))
-        daily = f"{item.get('daily_tokens', 0):,}"
+        email = item.get("email", "") or ""
+        if tokens is not None and (not email or email == "(No Email)" or email.endswith(" User")):
+            email = tokens.get_profile_email_from_local_state(p) or email
+        try:
+            import profile_ids
+            num = profile_ids.account_number(p)
+        except Exception:
+            num = None
+        if num is None and tokens is not None:
+            num = tokens._account_number(email)
+        rows.append((num if num is not None else 9999, p, email, item))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    table = Table(title="Transfer: profile usage", border_style="cyan")
+    table.add_column("Profile", style="bold cyan")
+    table.add_column("Account", style="white")
+    table.add_column("Today", justify="right", style="yellow")
+    table.add_column("Status", justify="left")
+    for num, p, email, item in rows:
+        until = 0
+        if tokens is not None and provider:
+            try:
+                until = tokens.get_rate_limited_until(p, provider)
+            except Exception:
+                until = 0
         if p == selected_profile:
-            lines.append(f"  - [bold green]{lbl} ({email}): {daily} tokens today (Selected: Lowest Usage)[/bold green]")
+            status = "[bold green]> Next[/bold green]"
+        elif until and until > now:
+            status = "[red]Limited until " + _time.strftime("%H:%M", _time.localtime(until)) + "[/red]"
         else:
-            lines.append(f"  - [dim]{lbl} ({email}): {daily} tokens today[/dim]")
-    console.print("\n".join(lines))
+            status = "[green]Ready[/green]"
+        table.add_row(escape(_label(p, email)), escape(email or "(No Email)"),
+                      f"{item.get('daily_tokens', 0):,}", status,
+                      style="bold" if p == selected_profile else None)
+    console.print(table)
 
 def show_help():
     help_text = """

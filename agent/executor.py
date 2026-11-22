@@ -83,6 +83,23 @@ def save_sudo(pwd):
     except Exception:
         pass
 
+def set_sudo(pwd):
+    """Saves the password only if sudo accepts it. Returns True when it was saved."""
+    if not pwd or not verify_sudo(pwd):
+        return False
+    save_sudo(pwd)
+    return True
+
+def clear_sudo():
+    """Removes the saved sudo password. Returns True if a vault file was deleted."""
+    try:
+        if os.path.exists(VAULT_FILE):
+            os.remove(VAULT_FILE)
+            return True
+    except Exception:
+        pass
+    return False
+
 def verify_sudo(pwd):
     """Pre-flight check: runs a harmless command to verify if the password is correct.
     No shell is involved, so quotes or metacharacters in the password are safe."""

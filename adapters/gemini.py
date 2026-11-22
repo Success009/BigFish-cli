@@ -381,6 +381,13 @@ class GeminiWebAdapter(BaseWebAdapter):
         except Exception:
             pass
 
+        # Clear any old text first so the new prompt never gets appended to it
+        try:
+            chat_box.fill("")
+            time.sleep(0.1)
+        except Exception:
+            pass
+
         # Copy prompt text to clipboard
         if os.name == 'nt':
             import win32clipboard

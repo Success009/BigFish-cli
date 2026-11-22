@@ -23,6 +23,26 @@ class PoolError(RuntimeError):
     """Profile copy, port or Chrome launch failed."""
 
 
+def _active_window():
+    """X11 id of the focused window, or None when xdotool is missing or fails."""
+    try:
+        if os.name == "nt" or not shutil.which("xdotool"):
+            return None
+        out = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True, timeout=2).stdout.strip()
+        return out if out.isdigit() else None
+    except Exception:
+        return None
+
+
+def _restore_window(win_id) -> None:
+    """Give focus back to win_id so a new background Chrome never keeps it."""
+    try:
+        if win_id and shutil.which("xdotool"):
+            subprocess.run(["xdotool", "windowactivate", str(win_id)], capture_output=True, timeout=2)
+    except Exception:
+        pass
+
+
 def _check_profile_name(profile: str) -> str:
     if (not profile or profile in (".", "..") or "/" in profile or "\\" in profile
             or os.sep in profile):
@@ -121,6 +141,7 @@ class BrowserSlot:
         build_profile_copy(self.src_dir, self.profile, self.dest_dir)
         try:
             self.port = pick_free_port(taken=self.port_taken)
+            _prev_window = _active_window()
             args = [binary,
                     "--user-data-dir=" + self.dest_dir,
                     "--profile-directory=" + self.profile,
@@ -137,6 +158,7 @@ class BrowserSlot:
                 if self.proc.poll() is not None:
                     raise PoolError("chrome exited early (code %s)" % self.proc.returncode)
                 if self.ready(self.port):
+                    _restore_window(_prev_window)
                     return self.cdp_url
                 time.sleep(0.2)
             raise PoolError("chrome debug port %d not ready in %.0fs" % (self.port, self.ready_timeout))

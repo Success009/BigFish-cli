@@ -17,6 +17,7 @@ import debuglog as dlog
 from config import CLI_CONFIG_FILE, load_cli_config, save_cli_config
 from profiles import (get_current_chrome_profile_dir, get_chrome_profile_dir_by_email, get_running_chrome_profile_dir,
     get_profile_email_for_dir, profile_label_for_dir, get_all_available_profiles, get_chrome_user_data_dir, get_latest_session)
+import profile_ids
 from handover import load_session_by_filename, compile_handover_packet
 from elevation import (needs_elevation_confirm, _elevated_register, _elevated_prompt, _elevated_resolve,
     get_project_root, is_sandboxed_path)
@@ -210,7 +211,7 @@ def main():
             )
             if profile_mismatch:
                 # Profile mismatch on running Chrome - restart with the target profile
-                with ui.get_spinner(f"🔄 Switching Chrome to {current_active_profile_dir} [{loaded_email}]..."):
+                with ui.get_spinner(f"🔄 Switching Chrome to {profile_label_for_dir(current_active_profile_dir)} [{loaded_email}]..."):
                     chrome_process, controller = restart_browser(None, controller, current_active_profile_dir, url=initial_url, provider=active_provider)
 
         # Only kill and restart Chrome if we couldn't connect to an existing instance
@@ -252,7 +253,7 @@ def main():
                             _notify.on_turn_finished(load_cli_config)
                         except Exception:
                             pass
-                    user_input = ui.show_prompt(estimate_tokens(chat_history), manual_mode=MANUAL_MODE, provider=adapters.get_adapter(active_provider).display_name)
+                    user_input = ui.show_prompt(estimate_tokens(chat_history), manual_mode=MANUAL_MODE, provider=adapters.get_adapter(active_provider).display_name, source=getattr(controller, "last_source", ""))
                 
                 # Skip empty inputs immediately to prevent looping blank strings
                 if not user_input or not user_input.strip():
@@ -285,6 +286,21 @@ def main():
                         else:
                             ui.show_status(f'Finish action: {_notify.get_action(load_cli_config)}, sound: {_notify.get_sound(load_cli_config)}. '
                                            'Usage: /sound ' + '|'.join(list(_notify.SOUNDS) + ['on', 'raise', 'raise+sound', 'off']) + '  (F2 = cycle action, F3 = cycle sound)')
+                        continue
+                    elif cmd == '/sudo':
+                        import executor as _ex
+                        _a = arg.strip()
+                        if _a.lower() == 'clear':
+                            _ex.clear_sudo()
+                            ui.show_status('Saved sudo password removed.')
+                        else:
+                            if not _a:
+                                import getpass
+                                _a = getpass.getpass('Sudo password: ')
+                            if _ex.set_sudo(_a):
+                                ui.show_status('Sudo password verified and saved.')
+                            else:
+                                ui.show_error('Wrong sudo password. Nothing was saved.')
                         continue
                     elif cmd == '/help': ui.show_help(); continue
                     elif cmd == '/speech':
@@ -539,25 +555,12 @@ def main():
 
                         next_profile_dir = None
                         if arg:
-                            try:
-                                select_idx = int(arg) - 1
-                                if 0 <= select_idx < len(available_profiles):
-                                    next_profile_dir = available_profiles[select_idx]
-                                else:
-                                    ui.show_error(f"Profile index '{arg}' is out of bounds. Available range: 1 to {len(available_profiles)}.")
-                                    continue
-                            except ValueError:
-                                clean_arg = arg.strip().lower()
-                                matched = None
-                                for p in available_profiles:
-                                    if profile_label_for_dir(p).lower() == clean_arg or (p.lower() == clean_arg and not clean_arg.startswith('profile')):
-                                        matched = p
-                                        break
-                                if matched:
-                                    next_profile_dir = matched
-                                else:
-                                    ui.show_error(f"Invalid profile selector '{arg}'. Pass a number between 1 and {len(available_profiles)}.")
-                                    continue
+                            _sel = profile_ids.resolve(arg, get_chrome_user_data_dir())
+                            if _sel and _sel in available_profiles:
+                                next_profile_dir = _sel
+                            else:
+                                ui.show_error(f"Invalid profile selector '{arg}'. Use an account number from 1 to {len(available_profiles)}, for example /transfer 13.")
+                                continue
                         else:
                             try:
                                 curr_idx = available_profiles.index(current_active_profile_dir)
@@ -624,25 +627,12 @@ def main():
                         
                         # Handle specific profile target argument (like /transfer 3)
                         if arg:
-                            try:
-                                select_idx = int(arg) - 1
-                                if 0 <= select_idx < len(available_profiles):
-                                    next_profile_dir = available_profiles[select_idx]
-                                else:
-                                    ui.show_error(f"Profile index '{arg}' is out of bounds. Available range: 1 to {len(available_profiles)}.")
-                                    continue
-                            except ValueError:
-                                clean_arg = arg.strip().lower()
-                                matched = None
-                                for p in available_profiles:
-                                    if profile_label_for_dir(p).lower() == clean_arg or (p.lower() == clean_arg and not clean_arg.startswith('profile')):
-                                        matched = p
-                                        break
-                                if matched:
-                                    next_profile_dir = matched
-                                else:
-                                    ui.show_error(f"Invalid profile selector '{arg}'. Pass a number between 1 and {len(available_profiles)}.")
-                                    continue
+                            _sel = profile_ids.resolve(arg, get_chrome_user_data_dir())
+                            if _sel and _sel in available_profiles:
+                                next_profile_dir = _sel
+                            else:
+                                ui.show_error(f"Invalid profile selector '{arg}'. Use an account number from 1 to {len(available_profiles)}, for example /transfer 13.")
+                                continue
                         else:
                             # Intelligent Least-Used Transfer Routing
                             usage_summary = tokens.get_profiles_usage_summary(available_profiles, provider=active_provider)
@@ -932,6 +922,8 @@ def main():
                         )
                         ui.show_status(f"⏱️ Response generated in {time.time() - start_time:.1f}s | 📊 Tokens: ~{prompt_tokens:,} in, ~{response_tokens:,} out")
                         
+                        if getattr(controller, "last_source", "") == "ui":
+                            ui.show_capture_notice("Not a network capture: this reply was scraped from the page (details in ui_fallback.log)")
                         current_url = controller.get_current_url()
                         if current_url: last_known_url = current_url
                         # Cut-off guard: a reply that ends inside a tool call is never run.
